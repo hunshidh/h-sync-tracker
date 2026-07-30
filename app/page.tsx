@@ -34,15 +34,16 @@ const emptyForm: MealForm = {
   fat: "",
 };
 
-function getTodayRange() {
-  const start = new Date();
+function getDayRange(date: Date) {
+  const start = new Date(date);
   start.setHours(0, 0, 0, 0);
-  const end = new Date();
+  const end = new Date(date);
   end.setHours(23, 59, 59, 999);
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
 export default function Home() {
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState<MealForm>(emptyForm);
   const [meals, setMeals] = useState<Meal[]>([]);
@@ -52,18 +53,12 @@ export default function Home() {
 
   const [isEditingGoal, setIsEditingGoal] = useState(false);
   const [calorieGoal, setCalorieGoal] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('h_sync_calorie_goal');
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("h_sync_calorie_goal");
       return saved ? Number(saved) : 2000;
     }
     return 2000;
   });
-
-  function handleGoalChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const newGoal = Number(e.target.value);
-    setCalorieGoal(newGoal);
-    localStorage.setItem('h_sync_calorie_goal', newGoal.toString());
-  }
 
   const caloriesEaten = meals.reduce((sum, meal) => sum + meal.calories, 0);
   const proteinEaten = meals.reduce((sum, meal) => sum + meal.protein, 0);
@@ -76,8 +71,9 @@ export default function Home() {
     { label: "Fat", value: fatEaten, unit: "g", color: "bg-amber-400" },
   ];
 
-  async function fetchTodayMeals() {
-    const { start, end } = getTodayRange();
+  async function fetchMealsForDate(date: Date) {
+    setIsLoadingMeals(true);
+    const { start, end } = getDayRange(date);
 
     const { data, error } = await supabase
       .from("meals")
@@ -88,15 +84,21 @@ export default function Home() {
 
     if (error) {
       console.error("Failed to fetch meals:", error.message);
-      return;
+    } else {
+      setMeals(data ?? []);
     }
-
-    setMeals(data ?? []);
+    setIsLoadingMeals(false);
   }
 
   useEffect(() => {
-    fetchTodayMeals().finally(() => setIsLoadingMeals(false));
-  }, []);
+    fetchMealsForDate(currentDate);
+  }, [currentDate]);
+
+  function handleGoalChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const newGoal = Number(e.target.value);
+    setCalorieGoal(newGoal);
+    localStorage.setItem("h_sync_calorie_goal", newGoal.toString());
+  }
 
   function openModal() {
     setIsModalOpen(true);
@@ -121,6 +123,7 @@ export default function Home() {
       protein: Number(form.protein) || 0,
       carbs: Number(form.carbs) || 0,
       fat: Number(form.fat) || 0,
+      created_at: currentDate.toISOString(), 
     });
 
     setIsSaving(false);
@@ -130,31 +133,48 @@ export default function Home() {
       return;
     }
 
-    await fetchTodayMeals();
+    await fetchMealsForDate(currentDate);
     closeModal();
   }
 
   async function handleDelete(meal: Meal) {
     setDeletingId(meal.id);
-
     const { error } = await supabase.from("meals").delete().eq("id", meal.id);
-
     setDeletingId(null);
 
     if (error) {
       console.error("Failed to delete meal:", error.message);
       return;
     }
-
     setMeals((prev) => prev.filter((item) => item.id !== meal.id));
   }
+
+  function prevDay() {
+    setCurrentDate((prev) => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() - 1);
+      return d;
+    });
+  }
+
+  function nextDay() {
+    setCurrentDate((prev) => {
+      const d = new Date(prev);
+      d.setDate(d.getDate() + 1);
+      return d;
+    });
+  }
+
+  const isToday = currentDate.toDateString() === new Date().toDateString();
+  const dateDisplay = isToday
+    ? "Today"
+    : currentDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   const inputClassName =
     "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-zinc-500 outline-none backdrop-blur-md transition-colors focus:border-emerald-400/40 focus:bg-white/10";
 
   return (
     <div className="relative flex min-h-full flex-1 flex-col overflow-hidden bg-zinc-950 text-zinc-100">
-      {/* Ambient glow for cinematic depth */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -169,16 +189,35 @@ export default function Home() {
           <h1 className="bg-gradient-to-r from-white via-white to-emerald-400 bg-clip-text text-xl font-black tracking-tighter text-transparent">
             H-Sync Tracker
           </h1>
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-zinc-400 backdrop-blur-lg">
-            Today
-          </span>
+          
+          {/* New Date Navigator */}
+          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-2 py-1 backdrop-blur-lg">
+            <button
+              onClick={prevDay}
+              className="rounded px-2 py-0.5 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              &larr;
+            </button>
+            <span className="w-16 text-center text-xs font-medium text-zinc-300">
+              {dateDisplay}
+            </span>
+            <button
+              onClick={nextDay}
+              disabled={isToday}
+              className={`rounded px-2 py-0.5 text-zinc-400 transition-colors ${
+                isToday ? "opacity-30 cursor-not-allowed" : "hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              &rarr;
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 py-12 pb-32">
         <div className="w-full rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl shadow-black/20 backdrop-blur-lg sm:p-10">
           <p className="text-center text-sm font-medium uppercase tracking-widest text-zinc-400">
-            Calories eaten today
+            Calories eaten
           </p>
 
           <div className="mt-6 flex items-baseline justify-center gap-2">
@@ -189,10 +228,10 @@ export default function Home() {
           </div>
 
           <div className="mt-8">
-            <div className="mb-2 flex justify-between items-center text-xs text-zinc-400">
+            <div className="mb-2 flex items-center justify-between text-xs text-zinc-400">
               <span>Progress</span>
               <span className="flex items-center gap-1.5">
-                {caloriesEaten} / 
+                {caloriesEaten} /
                 {isEditingGoal ? (
                   <input
                     type="number"
@@ -203,7 +242,7 @@ export default function Home() {
                     className="w-16 rounded bg-white/10 px-1 py-0.5 text-center text-white outline-none ring-1 ring-emerald-400/50"
                   />
                 ) : (
-                  <button 
+                  <button
                     onClick={() => setIsEditingGoal(true)}
                     className="cursor-pointer border-b border-dashed border-zinc-500 text-white transition-colors hover:text-emerald-400"
                     title="Click to edit goal"
@@ -247,7 +286,7 @@ export default function Home() {
           <div className="mt-10 border-t border-white/10 pt-8">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-sm font-medium uppercase tracking-widest text-zinc-400">
-                Today&apos;s Meals
+                Logged Meals
               </h2>
               <span className="text-xs text-zinc-500">
                 {meals.length} {meals.length === 1 ? "entry" : "entries"}
@@ -261,7 +300,7 @@ export default function Home() {
                 </p>
               ) : meals.length === 0 ? (
                 <p className="rounded-xl border border-white/10 bg-white/5 py-6 text-center text-sm text-zinc-500">
-                  No meals logged yet today.
+                  No meals logged for this date.
                 </p>
               ) : (
                 meals.map((meal) => (
@@ -359,7 +398,7 @@ export default function Home() {
               Add Meal
             </h2>
             <p className="mt-1 text-sm text-zinc-400">
-              Log what you ate to update today&apos;s totals.
+              Log what you ate to update totals for {dateDisplay}.
             </p>
 
             <form onSubmit={handleSave} className="mt-6 space-y-4">
